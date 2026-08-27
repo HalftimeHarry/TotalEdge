@@ -10,6 +10,16 @@ interface ColumnMap {
   totalLineIndex: number | null;
 }
 
+// Source CSV has duplicate header names; these required fields are mapped by known positions.
+const REQUIRED_COLUMN_INDEXES = {
+  week: 0,
+  date: 2,
+  team1: 4,
+  team2: 6,
+  team1Score: 8,
+  team2Score: 9,
+} as const;
+
 export class CsvImporter {
   public importFromText(csvText: string): NFLGame[] {
     const rows = this.parseRows(csvText);
@@ -71,12 +81,12 @@ export class CsvImporter {
     });
 
     return {
-      weekIndex: 0,
-      dateIndex: 2,
-      team1Index: 4,
-      team2Index: 6,
-      team1ScoreIndex: 8,
-      team2ScoreIndex: 9,
+      weekIndex: REQUIRED_COLUMN_INDEXES.week,
+      dateIndex: REQUIRED_COLUMN_INDEXES.date,
+      team1Index: REQUIRED_COLUMN_INDEXES.team1,
+      team2Index: REQUIRED_COLUMN_INDEXES.team2,
+      team1ScoreIndex: REQUIRED_COLUMN_INDEXES.team1Score,
+      team2ScoreIndex: REQUIRED_COLUMN_INDEXES.team2Score,
       totalLineIndex: totalLineIndex >= 0 ? totalLineIndex : null,
     };
   }
@@ -142,6 +152,10 @@ export class CsvImporter {
       }
 
       currentCell += character;
+    }
+
+    if (inQuotes) {
+      return rows;
     }
 
     if (currentCell.length > 0 || currentRow.length > 0) {
