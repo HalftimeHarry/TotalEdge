@@ -1,6 +1,7 @@
 import { describe, expect, it } from 'vitest';
 import { NFLGame } from '../models/NFLGame';
 import { PredictionEngine } from './PredictionEngine';
+import { TeamStrengthService } from './TeamStrengthService';
 
 describe('PredictionEngine', () => {
   it('recommends over when the historical total is above the listed total line', () => {
@@ -53,5 +54,26 @@ describe('PredictionEngine', () => {
     expect(under.reason).toContain('above the 45-point midpoint');
     expect(under.rating).toBeGreaterThanOrEqual(6);
     expect(under.strength).toMatch(/Strong|Moderate|Weak/);
+  });
+
+  it('builds a simple team strength rating from historical game results', () => {
+    const games = [
+      new NFLGame({
+        week: '1', date: '2025-09-07', team1: 'Kansas City Chiefs', team2: 'Baltimore Ravens', team1Score: 28, team2Score: 21, totalLine: 45.5,
+      }),
+      new NFLGame({
+        week: '2', date: '2025-09-14', team1: 'Kansas City Chiefs', team2: 'Cincinnati Bengals', team1Score: 31, team2Score: 17, totalLine: 47.5,
+      }),
+      new NFLGame({
+        week: '1', date: '2025-09-08', team1: 'Baltimore Ravens', team2: 'Las Vegas Raiders', team1Score: 14, team2Score: 19, totalLine: 43.5,
+      }),
+    ];
+
+    const ratings = new TeamStrengthService().buildRatings(games);
+
+    expect(ratings['Kansas City Chiefs']).toBeGreaterThan(ratings['Baltimore Ravens']);
+    expect(ratings['Kansas City Chiefs']).toBeGreaterThanOrEqual(6);
+    expect(ratings['Baltimore Ravens']).toBeGreaterThanOrEqual(1);
+    expect(ratings['Las Vegas Raiders']).toBeGreaterThanOrEqual(2);
   });
 });

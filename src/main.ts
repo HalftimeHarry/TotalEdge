@@ -1,7 +1,6 @@
 import './style.css';
 import { NFLGame } from './models/NFLGame';
 import { Prediction } from './models/Prediction';
-import { TEAM_NAMES } from './models/TeamRegistry';
 import { CsvImporter } from './services/CsvImporter';
 import { LineService } from './services/LineService';
 import { PredictionEngine } from './services/PredictionEngine';
@@ -26,7 +25,6 @@ class TotalEdgeApp {
   private readonly tableBody: HTMLTableSectionElement;
   private readonly generateButton: HTMLButtonElement;
   private readonly predictionList: HTMLUListElement;
-  private readonly teamList: HTMLUListElement;
 
   constructor() {
     this.appRoot = document.querySelector<HTMLDivElement>('#app')!;
@@ -44,9 +42,7 @@ class TotalEdgeApp {
     this.tableBody = document.querySelector<HTMLTableSectionElement>('#games-table-body')!;
     this.generateButton = document.querySelector<HTMLButtonElement>('#generate-button')!;
     this.predictionList = document.querySelector<HTMLUListElement>('#prediction-list')!;
-    this.teamList = document.querySelector<HTMLUListElement>('#team-list')!;
 
-    this.renderTeams();
     this.bindEvents();
     this.renderGames();
   }
@@ -241,16 +237,6 @@ class TotalEdgeApp {
     }
   }
 
-  private renderTeams(): void {
-    this.teamList.innerHTML = '';
-
-    for (const team of TEAM_NAMES) {
-      const listItem = document.createElement('li');
-      listItem.textContent = team;
-      this.teamList.appendChild(listItem);
-    }
-  }
-
   private appendCell(row: HTMLTableRowElement, value: string): void {
     const cell = document.createElement('td');
     cell.textContent = value;
@@ -269,9 +255,12 @@ class TotalEdgeApp {
   private getLayout(): string {
     return `
       <main class="dashboard">
-        <header>
-          <h1>TotalEdge</h1>
-          <p>NFL Totals Analysis</p>
+        <header class="app-header">
+          <img src="/logo.svg" alt="TotalEdge logo" class="app-logo" />
+          <div>
+            <h1>TotalEdge</h1>
+            <p>NFL Totals Analysis</p>
+          </div>
         </header>
 
         <section class="panel">
@@ -318,11 +307,6 @@ class TotalEdgeApp {
             <h2>Predictions</h2>
             <button id="generate-button" type="button" disabled>Generate Predictions</button>
           </div>
-        </section>
-
-        <section class="panel" style="display: none;">
-          <h2>Teams</h2>
-          <ul id="team-list" class="team-list"></ul>
         </section>
 
         <section class="panel" style="display: none;">

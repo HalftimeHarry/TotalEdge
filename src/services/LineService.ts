@@ -18,8 +18,10 @@ export class LineService {
       .replace(/\[[^\]]+\]\([^)]*\)/g, ' ')
       .replace(/Date#TeamSpreadTotalM\s*/gi, ' ')
       .replace(/\bLine\s*NFL\b/gi, ' ')
-      .replace(/NFL\s*-\s*WEEK\s*#\s*\d+\s*REGULAR\s*SEASON\s*-\s*GAME\s*LINE\(S\)/gi, ' ')
-      .replace(/(?:Sep|Oct|Nov|Dec|Jan|Feb)\s*\d{1,2}(?:\d{3})?\s*(?=(?:[A-Z]{2,4}\s+[A-Z0-9]))/gi, ' ')
+      .replace(/NFL\s*-\s*WEEK\s*#\s*\d+\s*(?:REGULAR\s*SEASON|PRESEASON)\s*-\s*GAME\s*LINE\(S\)/gi, ' ')
+      .replace(/NFL\s*-\s*(?:PRESEASON|REGULAR\s*SEASON)\s*-\s*/gi, ' ')
+      .replace(/\(\s*(?:PRESEASON|REGULAR\s*SEASON)\s*\)/gi, ' ')
+      .replace(/(?:Aug|Sep|Oct|Nov|Dec|Jan|Feb)\s*\d{1,2}(?:\d{3})?\s*(?=(?:[A-Z]{2,4}\s+[A-Z0-9]))/gi, ' ')
       .replace(/\b\d{1,2}:\d{2}\s*(?:AM|PM)\b/gi, ' ')
       .replace(/\bProps\b/gi, ' ')
       .replace(/\s+/g, ' ')
@@ -65,7 +67,7 @@ export class LineService {
   }
 
   private findNearestDate(value: string, index: number): string | null {
-    const dateMatches = [...value.slice(0, index).matchAll(/(?:^|\s)(Sep|Oct|Nov|Dec|Jan|Feb)\s*(\d{1,2})(?:\d{3})?(?=\D|$)/gi)];
+    const dateMatches = [...value.slice(0, index).matchAll(/(?:^|\s)(Aug|Sep|Oct|Nov|Dec|Jan|Feb)\s*(\d{1,2})(?:\d{3})?(?=\D|$)/gi)];
     const latest = dateMatches[dateMatches.length - 1];
 
     if (!latest) {
@@ -78,7 +80,7 @@ export class LineService {
   }
 
   private cleanDate(value: string): string {
-    const match = value.trim().match(/^(Sep|Oct|Nov|Dec|Jan|Feb)\s*(\d{1,2})$/i);
+    const match = value.trim().match(/^(Aug|Sep|Oct|Nov|Dec|Jan|Feb)\s*(\d{1,2})$/i);
 
     if (!match) {
       return value.trim().replace(/\s+/g, ' ');
@@ -90,7 +92,8 @@ export class LineService {
   }
 
   private resolveTeamName(display: string, rawValue: string): string {
-    const parts = display.trim().split(/\s+/);
+    const cleanedDisplay = display.trim().replace(/\s*\([^)]*\)\s*$/g, '').trim();
+    const parts = cleanedDisplay.split(/\s+/);
     const abbreviation = parts[0]?.toUpperCase() ?? '';
     const suffix = parts.slice(1).join(' ');
 
@@ -107,6 +110,7 @@ export class LineService {
     }
 
     const fallbackName = rawValue
+      .replace(/\s*\([^)]*\)\s*$/g, '')
       .replace(new RegExp(`^${abbreviation}`, 'i'), '')
       .replace(/\s+/g, ' ')
       .trim();

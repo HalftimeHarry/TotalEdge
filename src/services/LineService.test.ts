@@ -80,4 +80,21 @@ describe('LineService', () => {
     expect(lines[3].teamName).toBe('Los Angeles Rams');
     expect(lines[3].total).toBe(48);
   });
+
+  it('parses preseason line blocks that use August dates and parenthetical team labels', () => {
+    const raw = `Date#TeamSpreadTotalM LineNFL - PRESEASON - Aug 27 NFL - PRESEASON WEEK #3 GAME LINE(S)NFL - PRESEASON WEEK #3Aug 27107![]LA RAMS (PRESEASON)+3-110o38-110+1507:03 PM108![]LA CHARGERS (PRESEASON)-3-110u38-110-170NFL - PRESEASON - Aug 28 NFL - PRESEASON WEEK #3 GAME LINE(S)Aug 28109![]WAS COMMANDERS (PRESEASON)+3-110o33½-110+1403:03 PM110![]BAL RAVENS (PRESEASON)-3-110u33½-110-160`;
+
+    const lines = new LineService().importFromText(raw);
+
+    expect(lines.length).toBeGreaterThanOrEqual(4);
+    expect(lines[0].date).toBe('Aug 27');
+    expect(lines[0].teamName).toBe('Los Angeles Rams');
+    expect(lines[0].spread).toBe(3);
+    expect(lines[0].total).toBe(38);
+    expect(lines[1].teamName).toBe('Los Angeles Chargers');
+    expect(lines[1].spread).toBe(-3);
+    expect(lines[2].date).toBe('Aug 28');
+    expect(lines[2].teamName).toBe('Washington Commanders');
+    expect(lines[3].teamName).toBe('Baltimore Ravens');
+  });
 });
