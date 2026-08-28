@@ -211,12 +211,28 @@ class TotalEdgeApp {
     heading.innerHTML = `<h3>${previewText}</h3>`;
     this.predictionList.appendChild(heading);
 
-    for (const line of lines) {
+    const sortedLines = [...lines].sort((a, b) => {
+      const detailsA = PredictionEngine.getTotalPickDetails(a.total ?? null);
+      const detailsB = PredictionEngine.getTotalPickDetails(b.total ?? null);
+
+      const strengthRank = { Strong: 3, Moderate: 2, Weak: 1 } as const;
+      const strengthDelta = (strengthRank[detailsB.strength] ?? 0) - (strengthRank[detailsA.strength] ?? 0);
+
+      if (strengthDelta !== 0) {
+        return strengthDelta;
+      }
+
+      return detailsB.rating - detailsA.rating;
+    });
+
+    for (const line of sortedLines) {
       const total = line.total ?? null;
       const pickInfo = PredictionEngine.getTotalPickDetails(total);
       const pickLabel = `${pickInfo.strength} ${pickInfo.pick}`;
 
       const listItem = document.createElement('li');
+      listItem.className = `pick-pill ${pickInfo.pick.toLowerCase()} ${pickInfo.strength.toLowerCase()}`;
+
       const text = document.createElement('p');
       text.textContent = `${line.date} • ${line.teamName} • ${pickLabel} • Total ${line.total ?? 'N/A'} • ${pickInfo.rating}/10`;
       text.title = pickInfo.reason;
@@ -260,6 +276,7 @@ class TotalEdgeApp {
 
         <section class="panel">
           <h2>CSV Upload / Line Paste</h2>
+
           <div class="upload-controls">
             <label class="field-label" for="line-week-select">Week</label>
             <select id="line-week-select">
@@ -275,7 +292,7 @@ class TotalEdgeApp {
             <button id="parse-line-button" type="button">Parse Lines</button>
           </div>
 
-          <div class="upload-controls">
+          <div class="upload-controls" style="display: none;">
             <label class="field-label" for="week-filter">Imported week filter</label>
             <select id="week-filter">
               <option value="all">All weeks</option>
@@ -288,7 +305,7 @@ class TotalEdgeApp {
           </label>
         </section>
 
-        <section class="panel summary-grid">
+        <section class="panel summary-grid" style="display: none;">
           <div>
             <h2>Imported Week(s)</h2>
             <p id="week-value">None</p>
@@ -303,12 +320,12 @@ class TotalEdgeApp {
           </div>
         </section>
 
-        <section class="panel">
+        <section class="panel" style="display: none;">
           <h2>Teams</h2>
           <ul id="team-list" class="team-list"></ul>
         </section>
 
-        <section class="panel">
+        <section class="panel" style="display: none;">
           <h2>Imported Games</h2>
           <div class="table-wrap">
             <table>
