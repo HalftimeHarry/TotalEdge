@@ -127,6 +127,12 @@ header p {
   font-size: 0.85rem;
 }
 
+.field-hint {
+  color: #94a3b8;
+  font-size: 0.74rem;
+  line-height: 1.4;
+}
+
 textarea {
   width: 100%;
   min-height: 140px;

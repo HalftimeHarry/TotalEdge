@@ -56,6 +56,22 @@ describe('PredictionEngine', () => {
     expect(under.strength).toMatch(/Strong|Moderate|Weak/);
   });
 
+  it('explains the pick using the actual team name when available', () => {
+    const pick = PredictionEngine.getTotalPickDetails(40.5, 'Jacksonville Jaguars');
+
+    expect(pick.pick).toBe('OVER');
+    expect(pick.reason).toContain('Jacksonville Jaguars');
+    expect(pick.reason).toContain('below the 45-point midpoint');
+  });
+
+  it('allows the midpoint to be adjusted for model tuning', () => {
+    const customPick = PredictionEngine.getTotalPick(44, 42);
+    const customDetails = PredictionEngine.getTotalPickDetails(44, 'Jacksonville Jaguars', 42);
+
+    expect(customPick).toBe('UNDER');
+    expect(customDetails.reason).toContain('42-point midpoint');
+  });
+
   it('builds a simple team strength rating from historical game results', () => {
     const games = [
       new NFLGame({

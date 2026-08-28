@@ -17,6 +17,7 @@ class TotalEdgeApp {
   private readonly dropZone: HTMLLabelElement;
   private readonly weekFilter: HTMLSelectElement;
   private readonly lineWeekSelect: HTMLSelectElement;
+  private readonly midpointSelect: HTMLSelectElement;
   private readonly lineTextArea: HTMLTextAreaElement;
   private readonly parseLineButton: HTMLButtonElement;
   private readonly lineStatus: HTMLParagraphElement;
@@ -34,6 +35,7 @@ class TotalEdgeApp {
     this.dropZone = document.querySelector<HTMLLabelElement>('#drop-zone')!;
     this.weekFilter = document.querySelector<HTMLSelectElement>('#week-filter')!;
     this.lineWeekSelect = document.querySelector<HTMLSelectElement>('#line-week-select')!;
+    this.midpointSelect = document.querySelector<HTMLSelectElement>('#midpoint-select')!;
     this.lineTextArea = document.querySelector<HTMLTextAreaElement>('#line-text-input')!;
     this.parseLineButton = document.querySelector<HTMLButtonElement>('#parse-line-button')!;
     this.lineStatus = document.querySelector<HTMLParagraphElement>('#line-status')!;
@@ -84,6 +86,19 @@ class TotalEdgeApp {
 
     this.weekFilter.addEventListener('change', () => {
       this.applyWeekFilter();
+    });
+
+    this.midpointSelect.addEventListener('change', () => {
+      const rawValue = this.lineTextArea.value.trim();
+      if (!rawValue) {
+        return;
+      }
+
+      const week = this.lineWeekSelect.value;
+      const lines = this.lineService.importFromText(rawValue);
+      if (lines.length) {
+        this.renderLinePreview(lines, week);
+      }
     });
 
     this.parseLineButton.addEventListener('click', () => {
@@ -207,9 +222,10 @@ class TotalEdgeApp {
     heading.innerHTML = `<h3>${previewText}</h3>`;
     this.predictionList.appendChild(heading);
 
+    const midpoint = Number(this.midpointSelect.value);
     const sortedLines = [...lines].sort((a, b) => {
-      const detailsA = PredictionEngine.getTotalPickDetails(a.total ?? null);
-      const detailsB = PredictionEngine.getTotalPickDetails(b.total ?? null);
+      const detailsA = PredictionEngine.getTotalPickDetails(a.total ?? null, a.teamName, midpoint);
+      const detailsB = PredictionEngine.getTotalPickDetails(b.total ?? null, b.teamName, midpoint);
 
       const strengthRank = { Strong: 3, Moderate: 2, Weak: 1 } as const;
       const strengthDelta = (strengthRank[detailsB.strength] ?? 0) - (strengthRank[detailsA.strength] ?? 0);
@@ -223,16 +239,21 @@ class TotalEdgeApp {
 
     for (const line of sortedLines) {
       const total = line.total ?? null;
-      const pickInfo = PredictionEngine.getTotalPickDetails(total);
+      const pickInfo = PredictionEngine.getTotalPickDetails(total, line.teamName, midpoint);
       const pickLabel = `${pickInfo.strength} ${pickInfo.pick}`;
 
       const listItem = document.createElement('li');
       listItem.className = `pick-pill ${pickInfo.pick.toLowerCase()} ${pickInfo.strength.toLowerCase()}`;
 
-      const text = document.createElement('p');
-      text.textContent = `${line.date} • ${line.teamName} • ${pickLabel} • Total ${line.total ?? 'N/A'} • ${pickInfo.rating}/10`;
-      text.title = pickInfo.reason;
-      listItem.appendChild(text);
+      const summary = document.createElement('p');
+      summary.textContent = `${line.date} • ${line.teamName} • ${pickLabel} • Total ${line.total ?? 'N/A'} • ${pickInfo.rating}/10`;
+      summary.title = pickInfo.reason;
+
+      const details = document.createElement('p');
+      details.className = 'muted';
+      details.textContent = pickInfo.reason;
+
+      listItem.append(summary, details);
       this.predictionList.appendChild(listItem);
     }
   }
@@ -265,6 +286,17 @@ class TotalEdgeApp {
 
         <section class="panel">
           <h2>CSV Upload / Line Paste</h2>
+
+          <div class="upload-controls">
+            <label class="field-label" for="midpoint-select">Totals midpoint</label>
+            <select id="midpoint-select">
+              ${Array.from({ length: 15 }, (_, index) => {
+                const value = 38 + index;
+                return `<option value="${value}" ${value === 45 ? 'selected' : ''}>${value}</option>`;
+              }).join('')}
+            </select>
+            <small class="field-hint">Example: a dome or warm, calm game usually supports a lower midpoint like 42–44 because scoring is easier, while a cold, windy outdoor game usually supports a higher midpoint like 46–48 because the weather can suppress scoring. Lower values lean more Over; higher values lean more Under.</small>
+          </div>
 
           <div class="upload-controls">
             <label class="field-label" for="line-week-select">Week</label>

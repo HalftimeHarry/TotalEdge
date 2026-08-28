@@ -9,51 +9,65 @@ export interface TotalPickDetails {
 }
 
 export class PredictionEngine {
-  public static getTotalPick(totalLine: number | null): 'OVER' | 'UNDER' | 'PUSH' {
+  public static getTotalPick(totalLine: number | null, midpoint = 45): 'OVER' | 'UNDER' | 'PUSH' {
     if (totalLine === null) {
       return 'PUSH';
     }
 
-    if (totalLine <= 43.5) {
+    const lowThreshold = midpoint - 1.5;
+    const highThreshold = midpoint + 1.5;
+
+    if (totalLine <= lowThreshold) {
       return 'OVER';
     }
 
-    if (totalLine >= 47.5) {
+    if (totalLine >= highThreshold) {
       return 'UNDER';
     }
 
-    return totalLine > 45 ? 'UNDER' : 'OVER';
+    return totalLine > midpoint ? 'UNDER' : 'OVER';
   }
 
-  public static getTotalPickDetails(totalLine: number | null): TotalPickDetails {
-    const pick = PredictionEngine.getTotalPick(totalLine);
+  public static getTotalPickDetails(totalLine: number | null, matchup?: string, midpoint = 45): TotalPickDetails {
+    const pick = PredictionEngine.getTotalPick(totalLine, midpoint);
 
     if (pick === 'PUSH' || totalLine === null) {
       return {
         pick: 'UNDER',
         strength: 'Weak',
-        reason: 'No total line available for a totals pick.',
+        reason: matchup
+          ? `${matchup} has no usable total line for a reliable totals pick.`
+          : 'No total line available for a totals pick.',
         rating: 0,
       };
     }
 
-    const direction = pick === 'OVER' ? 'below the 45-point midpoint' : 'above the 45-point midpoint';
-    const strength: TotalPickDetails['strength'] = totalLine <= 41
+    const direction = pick === 'OVER' ? `below the ${midpoint}-point midpoint` : `above the ${midpoint}-point midpoint`;
+    const strongThreshold = midpoint - 4;
+    const moderateThreshold = midpoint;
+    const weakThreshold = midpoint + 2;
+
+    const strength: TotalPickDetails['strength'] = totalLine <= strongThreshold
       ? 'Strong'
-      : totalLine <= 45
+      : totalLine <= moderateThreshold
         ? 'Moderate'
-        : totalLine <= 47
+        : totalLine <= weakThreshold
           ? 'Weak'
           : 'Moderate';
 
     const rating = pick === 'OVER'
-      ? (totalLine <= 41 ? 9 : totalLine <= 45 ? 8 : totalLine <= 47 ? 7 : 6)
-      : (totalLine >= 49 ? 9 : totalLine >= 47 ? 8 : totalLine >= 45 ? 7 : 6);
+      ? (totalLine <= strongThreshold ? 9 : totalLine <= moderateThreshold ? 8 : totalLine <= weakThreshold ? 7 : 6)
+      : (totalLine >= midpoint + 4 ? 9 : totalLine >= midpoint + 2 ? 8 : totalLine >= midpoint ? 7 : 6);
+
+    const matchupText = matchup ? matchup.trim() : 'this matchup';
+    const reasonBase = pick === 'OVER'
+      ? `The total sits ${direction}, which gives ${matchupText} a ${strength.toLowerCase()} over angle. The market is pricing this game below a typical ${midpoint}-point script, so the scoring setup leans toward the over.`
+      : `The total sits ${direction}, which gives ${matchupText} a ${strength.toLowerCase()} under angle. The market is pricing this game above a typical ${midpoint}-point script, so the scoring setup leans toward the under.`;
 
     return {
       pick,
       strength,
-      reason: `This total sits ${direction}, which makes it a ${strength.toLowerCase()} ${pick.toLowerCase()} angle based on the market midpoint.`,
+      reason: matchup ? `${matchupText}: ${reasonBase}` : reasonBase,
       rating,
     };
   }
