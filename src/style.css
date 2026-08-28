@@ -90,6 +90,52 @@ header p {
   font-weight: 600;
 }
 
+.upload-controls {
+  display: grid;
+  gap: 0.4rem;
+  margin-bottom: 0.75rem;
+}
+
+.field-label {
+  color: #cbd5e1;
+  font-size: 0.85rem;
+}
+
+textarea {
+  width: 100%;
+  min-height: 140px;
+  resize: vertical;
+  border: 1px solid #334155;
+  border-radius: 8px;
+  background: #0f172a;
+  color: #f8fafc;
+  padding: 0.75rem;
+  font: inherit;
+}
+
+select {
+  width: 100%;
+  border: 1px solid #334155;
+  border-radius: 8px;
+  background: #0f172a;
+  color: #f8fafc;
+  padding: 0.5rem 0.7rem;
+}
+
+.paste-actions {
+  margin: 0.75rem 0 1rem;
+}
+
+.line-status {
+  margin: 0.5rem 0 0;
+  font-size: 0.85rem;
+  color: #cbd5e1;
+}
+
+.line-status.error {
+  color: #fca5a5;
+}
+
 button {
   border: 0;
   border-radius: 8px;
@@ -129,6 +175,24 @@ th {
 
 td {
   color: #e2e8f0;
+}
+
+.team-list {
+  list-style: none;
+  padding: 0;
+  margin: 0;
+  display: flex;
+  flex-wrap: wrap;
+  gap: 0.5rem;
+}
+
+.team-list li {
+  border: 1px solid #334155;
+  border-radius: 999px;
+  background: rgba(14, 165, 233, 0.12);
+  color: #e2e8f0;
+  padding: 0.3rem 0.7rem;
+  font-size: 0.8rem;
 }
 
 .prediction-list {

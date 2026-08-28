@@ -1,4 +1,5 @@
 import { NFLGame } from '../models/NFLGame';
+import { normalizeTeamName } from '../models/TeamRegistry';
 
 interface ColumnMap {
   weekIndex: number;
@@ -10,18 +11,17 @@ interface ColumnMap {
   totalLineIndex: number | null;
 }
 
-// Source CSV has duplicate header names; these required fields are mapped by known positions.
 const REQUIRED_COLUMN_INDEXES = {
   week: 0,
-  date: 2,
-  team1: 4,
-  team2: 6,
-  team1Score: 8,
-  team2Score: 9,
-} as const;
+  date: 1,
+  team1: 2,
+  team2: 3,
+  team1Score: 4,
+  team2Score: 5,
+};
 
 export class CsvImporter {
-  public importFromText(csvText: string): NFLGame[] {
+  public importFromText(csvText: string, selectedWeek?: string): NFLGame[] {
     const rows = this.parseRows(csvText);
 
     if (rows.length < 2) {
@@ -33,7 +33,7 @@ export class CsvImporter {
 
     for (let i = 1; i < rows.length; i += 1) {
       const row = rows[i];
-      const game = this.mapRowToGame(row, columnMap);
+      const game = this.mapRowToGame(row, columnMap, selectedWeek);
 
       if (game) {
         games.push(game);
@@ -43,13 +43,39 @@ export class CsvImporter {
     return games;
   }
 
-  private mapRowToGame(row: string[], map: ColumnMap): NFLGame | null {
+  public getAvailableWeeks(csvText: string): string[] {
+    const rows = this.parseRows(csvText);
+
+    if (rows.length < 2) {
+      return [];
+    }
+
+    const columnMap = this.getColumnMap(rows[0]);
+    const weeks = new Set<string>();
+
+    for (let i = 1; i < rows.length; i += 1) {
+      const row = rows[i];
+      const week = this.readValue(row, columnMap.weekIndex);
+
+      if (week) {
+        weeks.add(week);
+      }
+    }
+
+    return Array.from(weeks).sort((left, right) => left.localeCompare(right, undefined, { numeric: true }));
+  }
+
+  private mapRowToGame(row: string[], map: ColumnMap, selectedWeek?: string): NFLGame | null {
     const week = this.readValue(row, map.weekIndex);
     const date = this.readValue(row, map.dateIndex);
-    const team1 = this.readValue(row, map.team1Index);
-    const team2 = this.readValue(row, map.team2Index);
+    const team1 = normalizeTeamName(this.readValue(row, map.team1Index));
+    const team2 = normalizeTeamName(this.readValue(row, map.team2Index));
     const team1Score = this.parseNumber(this.readValue(row, map.team1ScoreIndex));
     const team2Score = this.parseNumber(this.readValue(row, map.team2ScoreIndex));
+
+    if (selectedWeek && this.normalizeWeekLabel(week) !== this.normalizeWeekLabel(selectedWeek)) {
+      return null;
+    }
 
     if (!week || !date || !team1 || !team2 || team1Score === null || team2Score === null) {
       return null;
@@ -69,29 +95,62 @@ export class CsvImporter {
   }
 
   private getColumnMap(headers: string[]): ColumnMap {
-    const totalLineIndex = headers.findIndex((header) => {
-      const normalizedHeader = header.trim().toLowerCase();
+    const normalizedHeaders = headers.map((header) => header.trim().toLowerCase());
 
-      return normalizedHeader === 'total line'
-        || normalizedHeader === 'totalline'
-        || normalizedHeader === 'closing total'
-        || normalizedHeader === 'closing_total'
-        || normalizedHeader === 'ou line'
-        || normalizedHeader === 'over/under';
-    });
+    const weekIndex = this.findHeaderIndex(normalizedHeaders, ['week', 'week number', 'wk', 'week #']);
+    const dateIndex = this.findHeaderIndex(normalizedHeaders, ['date', 'game date', 'matchup date']);
+    const team1Index = this.findHeaderIndex(normalizedHeaders, ['winner/tie', 'winner', 'team 1', 'team1', 'home team', 'home', 'team 1 name', 'team 1 team']);
+    const team2Index = this.findHeaderIndex(normalizedHeaders, ['loser/tie', 'loser', 'team 2', 'team2', 'away team', 'away', 'team 2 name', 'team 2 team']);
+    const team1ScoreIndex = this.findHeaderIndex(normalizedHeaders, ['team 1 score', 'team1 score', 'score 1', 'score1', 'home score', 'pts']);
+    const team2ScoreIndex = this.findHeaderIndex(normalizedHeaders, ['team 2 score', 'team2 score', 'score 2', 'score2', 'away score', 'pts']);
+    const totalLineIndex = this.findHeaderIndex(normalizedHeaders, ['total line', 'totalline', 'closing total', 'closing_total', 'ou line', 'over/under', 'total']);
+
+    const duplicatePtsIndexes = normalizedHeaders
+      .map((header, index) => (header === 'pts' || header.includes('pts') ? index : -1))
+      .filter((index) => index >= 0);
+
+    const resolvedTeam1ScoreIndex = team1ScoreIndex >= 0 && team2ScoreIndex >= 0 && team1ScoreIndex === team2ScoreIndex && duplicatePtsIndexes.length >= 2
+      ? duplicatePtsIndexes[0]
+      : team1ScoreIndex;
+    const resolvedTeam2ScoreIndex = team1ScoreIndex >= 0 && team2ScoreIndex >= 0 && team1ScoreIndex === team2ScoreIndex && duplicatePtsIndexes.length >= 2
+      ? duplicatePtsIndexes[1]
+      : team2ScoreIndex;
 
     return {
-      weekIndex: REQUIRED_COLUMN_INDEXES.week,
-      dateIndex: REQUIRED_COLUMN_INDEXES.date,
-      team1Index: REQUIRED_COLUMN_INDEXES.team1,
-      team2Index: REQUIRED_COLUMN_INDEXES.team2,
-      team1ScoreIndex: REQUIRED_COLUMN_INDEXES.team1Score,
-      team2ScoreIndex: REQUIRED_COLUMN_INDEXES.team2Score,
+      weekIndex: weekIndex >= 0 ? weekIndex : REQUIRED_COLUMN_INDEXES.week,
+      dateIndex: dateIndex >= 0 ? dateIndex : REQUIRED_COLUMN_INDEXES.date,
+      team1Index: team1Index >= 0 ? team1Index : REQUIRED_COLUMN_INDEXES.team1,
+      team2Index: team2Index >= 0 ? team2Index : REQUIRED_COLUMN_INDEXES.team2,
+      team1ScoreIndex: resolvedTeam1ScoreIndex >= 0 ? resolvedTeam1ScoreIndex : REQUIRED_COLUMN_INDEXES.team1Score,
+      team2ScoreIndex: resolvedTeam2ScoreIndex >= 0 ? resolvedTeam2ScoreIndex : REQUIRED_COLUMN_INDEXES.team2Score,
       totalLineIndex: totalLineIndex >= 0 ? totalLineIndex : null,
     };
   }
 
+  private findHeaderIndex(headers: string[], aliases: string[]): number {
+    for (const alias of aliases) {
+      const matchingIndex = headers.findIndex((header) => {
+        const normalizedHeader = header.trim().toLowerCase();
+        return normalizedHeader === alias || normalizedHeader.includes(alias);
+      });
+
+      if (matchingIndex >= 0) {
+        return matchingIndex;
+      }
+    }
+
+    return -1;
+  }
+
+  private normalizeWeekLabel(value: string): string {
+    return value.trim().toLowerCase().replace(/^week\s*/i, '').replace(/\s+/g, ' ').trim();
+  }
+
   private readValue(row: string[], index: number): string {
+    if (index < 0) {
+      return '';
+    }
+
     return row[index]?.trim() ?? '';
   }
 
