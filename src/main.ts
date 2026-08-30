@@ -4,8 +4,18 @@ import { Prediction } from './models/Prediction';
 import { CsvImporter } from './services/CsvImporter';
 import { LineService } from './services/LineService';
 import { PredictionEngine } from './services/PredictionEngine';
+import {
+  getActiveProfile,
+  readSavedProfiles,
+  removeSavedProfile,
+  setActiveProfile,
+  upsertSavedProfile,
+} from './services/LineProfileStorage';
 
 class TotalEdgeApp {
+  private static readonly PARSED_LINES_KEY = 'totaledge.parsed-lines';
+  private static readonly MIDPOINT_KEY = 'totaledge.midpoint';
+
   private readonly importer = new CsvImporter();
   private readonly lineService = new LineService();
   private readonly predictionEngine = new PredictionEngine();
@@ -20,7 +30,10 @@ class TotalEdgeApp {
   private readonly midpointSelect: HTMLSelectElement;
   private readonly lineTextArea: HTMLTextAreaElement;
   private readonly parseLineButton: HTMLButtonElement;
+  private readonly defaultProfileButton: HTMLButtonElement;
+  private readonly clearLinesButton: HTMLButtonElement;
   private readonly lineStatus: HTMLParagraphElement;
+  private readonly savedProfilesList: HTMLDivElement;
   private readonly weekValue: HTMLSpanElement;
   private readonly gameCountValue: HTMLSpanElement;
   private readonly tableBody: HTMLTableSectionElement;
@@ -38,15 +51,167 @@ class TotalEdgeApp {
     this.midpointSelect = document.querySelector<HTMLSelectElement>('#midpoint-select')!;
     this.lineTextArea = document.querySelector<HTMLTextAreaElement>('#line-text-input')!;
     this.parseLineButton = document.querySelector<HTMLButtonElement>('#parse-line-button')!;
+    this.defaultProfileButton = document.querySelector<HTMLButtonElement>('#default-profile-button')!;
+    this.clearLinesButton = document.querySelector<HTMLButtonElement>('#clear-lines-button')!;
     this.lineStatus = document.querySelector<HTMLParagraphElement>('#line-status')!;
+    this.savedProfilesList = document.querySelector<HTMLDivElement>('#saved-profiles-list')!;
     this.weekValue = document.querySelector<HTMLSpanElement>('#week-value')!;
     this.gameCountValue = document.querySelector<HTMLSpanElement>('#game-count-value')!;
     this.tableBody = document.querySelector<HTMLTableSectionElement>('#games-table-body')!;
     this.generateButton = document.querySelector<HTMLButtonElement>('#generate-button')!;
     this.predictionList = document.querySelector<HTMLUListElement>('#prediction-list')!;
 
+    this.restoreSavedDefaults();
+    this.updateDefaultProfileButtonLabel();
     this.bindEvents();
     this.renderGames();
+  }
+
+  private restoreSavedDefaults(): void {
+    const savedProfiles = readSavedProfiles();
+    const activeProfile = getActiveProfile() ?? savedProfiles[0] ?? null;
+    const savedMidpoint = activeProfile?.midpoint ?? this.readStoredNumber(TotalEdgeApp.MIDPOINT_KEY, 45);
+    this.midpointSelect.value = String(savedMidpoint);
+
+    const savedLines = activeProfile?.rawText ?? localStorage.getItem(TotalEdgeApp.PARSED_LINES_KEY);
+    if (savedLines && savedLines.trim()) {
+      this.lineTextArea.value = savedLines;
+      const week = this.lineWeekSelect.value;
+      const lines = this.lineService.importFromText(savedLines);
+      if (lines.length) {
+        this.lineStatus.textContent = `Loaded ${lines.length} saved matchup rows for Week ${week}.`;
+        this.lineStatus.classList.remove('error');
+        this.renderLinePreview(lines, week);
+      }
+    }
+
+    this.renderSavedProfiles();
+  }
+
+  private renderSavedProfiles(): void {
+    const profiles = readSavedProfiles();
+    this.savedProfilesList.innerHTML = '';
+
+    if (!profiles.length) {
+      const empty = document.createElement('p');
+      empty.className = 'saved-profile-empty';
+      empty.textContent = 'No saved midpoint defaults yet.';
+      this.savedProfilesList.appendChild(empty);
+      return;
+    }
+
+    const activeProfile = getActiveProfile() ?? profiles[0];
+
+    for (const profile of profiles) {
+      const button = document.createElement('button');
+      button.type = 'button';
+      button.className = `saved-profile-button ${activeProfile && activeProfile.midpoint === profile.midpoint ? 'active' : ''}`;
+      button.textContent = `Midpoint ${profile.midpoint}`;
+      button.title = `Use midpoint ${profile.midpoint} defaults`;
+      button.addEventListener('click', () => {
+        setActiveProfile(profile.midpoint);
+        this.loadSavedProfile(profile.midpoint);
+      });
+      this.savedProfilesList.appendChild(button);
+    }
+  }
+
+  private saveCurrentProfile(): void {
+    const rawValue = this.lineTextArea.value.trim();
+    if (!rawValue) {
+      return;
+    }
+
+    const midpoint = Number(this.midpointSelect.value);
+    const profiles = upsertSavedProfile({
+      midpoint,
+      rawText: rawValue,
+      updatedAt: new Date().toISOString(),
+    });
+
+    setActiveProfile(midpoint);
+    localStorage.setItem(TotalEdgeApp.PARSED_LINES_KEY, rawValue);
+    localStorage.setItem(TotalEdgeApp.MIDPOINT_KEY, String(midpoint));
+    this.renderSavedProfiles();
+    this.defaultProfileButton.textContent = `Default: Midpoint ${midpoint}`;
+    this.defaultProfileButton.disabled = false;
+
+    if (profiles.length > 0) {
+      this.defaultProfileButton.title = `${profiles.length} saved profile${profiles.length === 1 ? '' : 's'} available`;
+    }
+  }
+
+  private clearSavedLines(): void {
+    const currentMidpoint = Number(this.midpointSelect.value || 45);
+    removeSavedProfile(currentMidpoint);
+    setActiveProfile(Number.NaN);
+    localStorage.removeItem(TotalEdgeApp.PARSED_LINES_KEY);
+    localStorage.removeItem(TotalEdgeApp.MIDPOINT_KEY);
+    this.lineTextArea.value = '';
+    this.predictionList.innerHTML = '';
+    this.lineStatus.textContent = 'Cleared saved default lines. Paste a new set of lines when ready.';
+    this.lineStatus.classList.remove('error');
+    this.renderSavedProfiles();
+    this.updateDefaultProfileButtonLabel();
+  }
+
+  private saveMidpoint(value: number): void {
+    localStorage.setItem(TotalEdgeApp.MIDPOINT_KEY, String(value));
+    const activeProfile = getActiveProfile();
+    if (activeProfile && activeProfile.midpoint === value) {
+      const profiles = readSavedProfiles();
+      const nextProfiles = profiles.map((profile) => profile.midpoint === value ? { ...profile, midpoint: value, updatedAt: new Date().toISOString() } : profile);
+      localStorage.setItem('totaledge.default-line-profiles', JSON.stringify(nextProfiles));
+    }
+    this.updateDefaultProfileButtonLabel();
+  }
+
+  private updateDefaultProfileButtonLabel(): void {
+    const profiles = readSavedProfiles();
+    const activeProfile = getActiveProfile() ?? profiles[0] ?? null;
+
+    if (activeProfile) {
+      this.defaultProfileButton.textContent = `Default: Midpoint ${activeProfile.midpoint}`;
+      this.defaultProfileButton.disabled = false;
+      return;
+    }
+
+    this.defaultProfileButton.textContent = 'No saved default';
+    this.defaultProfileButton.disabled = true;
+  }
+
+  private loadSavedProfile(midpoint: number): void {
+    const profiles = readSavedProfiles();
+    const profile = profiles.find((candidate) => candidate.midpoint === midpoint);
+    if (!profile) {
+      return;
+    }
+
+    this.midpointSelect.value = String(profile.midpoint);
+    this.lineTextArea.value = profile.rawText;
+    localStorage.setItem(TotalEdgeApp.MIDPOINT_KEY, String(profile.midpoint));
+    localStorage.setItem(TotalEdgeApp.PARSED_LINES_KEY, profile.rawText);
+    setActiveProfile(profile.midpoint);
+
+    const week = this.lineWeekSelect.value;
+    const lines = this.lineService.importFromText(profile.rawText);
+    if (lines.length) {
+      this.lineStatus.textContent = `Loaded saved default: Midpoint ${profile.midpoint} • ${lines.length} matchup rows.`;
+      this.lineStatus.classList.remove('error');
+      this.renderLinePreview(lines, week);
+    }
+    this.updateDefaultProfileButtonLabel();
+    this.renderSavedProfiles();
+  }
+
+  private readStoredNumber(key: string, fallback: number): number {
+    const raw = localStorage.getItem(key);
+    if (raw === null || raw === '') {
+      return fallback;
+    }
+
+    const parsed = Number(raw);
+    return Number.isFinite(parsed) ? parsed : fallback;
   }
 
   private bindEvents(): void {
@@ -90,6 +255,9 @@ class TotalEdgeApp {
 
     this.midpointSelect.addEventListener('change', () => {
       const rawValue = this.lineTextArea.value.trim();
+      const selectedMidpoint = Number(this.midpointSelect.value);
+      this.saveMidpoint(selectedMidpoint);
+
       if (!rawValue) {
         return;
       }
@@ -121,9 +289,22 @@ class TotalEdgeApp {
         return;
       }
 
-      this.lineStatus.textContent = `Parsed ${lines.length} matchup rows for Week ${week}.`;
+      this.saveCurrentProfile();
+      this.lineStatus.textContent = `Parsed ${lines.length} matchup rows for Week ${week}. Saved as default for midpoint ${this.midpointSelect.value}.`;
       this.lineStatus.classList.remove('error');
       this.renderLinePreview(lines, week);
+    });
+
+    this.defaultProfileButton.addEventListener('click', () => {
+      const profiles = readSavedProfiles();
+      const active = getActiveProfile() ?? profiles[0];
+      if (active) {
+        this.loadSavedProfile(active.midpoint);
+      }
+    });
+
+    this.clearLinesButton.addEventListener('click', () => {
+      this.clearSavedLines();
     });
 
     this.generateButton.addEventListener('click', () => {
@@ -421,7 +602,11 @@ class TotalEdgeApp {
 
           <div class="paste-actions">
             <button id="parse-line-button" type="button">Parse Lines</button>
+            <button id="default-profile-button" type="button" class="secondary">No saved default</button>
+            <button id="clear-lines-button" type="button" class="secondary">Clear Default Lines</button>
           </div>
+
+          <div id="saved-profiles-list" class="saved-profiles-list"></div>
 
           <div class="upload-controls" style="display: none;">
             <label class="field-label" for="week-filter">Imported week filter</label>
