@@ -72,6 +72,180 @@ describe('PredictionEngine', () => {
     expect(customDetails.reason).toContain('42-point midpoint');
   });
 
+  it('waits for the sportsbook 2h line before calling a butter-zone hedge', () => {
+    const plan = PredictionEngine.getHalftimeHedge({
+      totalLine: 44,
+      halftimeTotal: 22,
+      originalSide: 'OVER',
+      stake: 100,
+      midpoint: 45,
+      secondHalfLine: null,
+    });
+
+    expect(plan.result).toBe('WAITING_FOR_LINE');
+    expect(plan.hedgeSide).toBe('UNDER');
+    expect(plan.hedgePercent).toBe(0);
+    expect(plan.summary).toContain('waiting for 2h line');
+  });
+
+  it('uses the sportsbook 2h line to keep the original position unless a real dual-win window exists', () => {
+    const plan = PredictionEngine.getLiveHalftimeSummary({
+      totalLine: 46,
+      halftimeScore: 27,
+      secondHalfProjection: 12,
+      originalSide: 'UNDER',
+      stake: 100,
+      juice: '-110',
+      sportsbookSecondHalfLine: 18.5,
+    });
+
+    expect(plan.result).toBe('BROWN_ZONE');
+    expect(plan.hedgeSide).toBe('OVER');
+    expect(plan.summary).toContain('hold original position');
+  });
+
+  it('identifies a strong butter zone for an original under with room to spare', () => {
+    const plan = PredictionEngine.getLiveHalftimeSummary({
+      totalLine: 48,
+      halftimeScore: 8,
+      secondHalfProjection: 24,
+      originalSide: 'UNDER',
+      stake: 100,
+      juice: '-110',
+      sportsbookSecondHalfLine: 18.5,
+    });
+
+    expect(plan.result).toBe('BUTTER_ZONE');
+    expect(plan.summary).toContain('butter-zone');
+    expect(plan.hedgePercent).toBeGreaterThan(0.5);
+  });
+
+  it('treats a later halftime under as a weaker, narrower butter zone than early halftime under', () => {
+    const earlyPlan = PredictionEngine.getLiveHalftimeSummary({
+      totalLine: 48,
+      halftimeScore: 8,
+      secondHalfProjection: 24,
+      originalSide: 'UNDER',
+      stake: 100,
+      juice: '-110',
+      sportsbookSecondHalfLine: 18.5,
+    });
+
+    const laterPlan = PredictionEngine.getLiveHalftimeSummary({
+      totalLine: 48,
+      halftimeScore: 19,
+      secondHalfProjection: 24,
+      originalSide: 'UNDER',
+      stake: 100,
+      juice: '-110',
+      sportsbookSecondHalfLine: 18.5,
+    });
+
+    expect(earlyPlan.result).toBe('BUTTER_ZONE');
+    expect(laterPlan.result).toBe('BUTTER_ZONE');
+    expect(earlyPlan.hedgePercent).toBeGreaterThan(laterPlan.hedgePercent);
+  });
+
+  it('accepts a true dual-win over hedge when the sportsbook line still leaves enough room to win both', () => {
+    const plan = PredictionEngine.getLiveHalftimeSummary({
+      totalLine: 40.5,
+      halftimeScore: 34,
+      secondHalfProjection: 20.25,
+      originalSide: 'OVER',
+      stake: 100,
+      juice: '-110',
+      sportsbookSecondHalfLine: 24,
+    });
+
+    expect(plan.result).toBe('BUTTER_ZONE');
+    expect(plan.summary).toContain('butter-zone');
+    expect(plan.hedgeSide).toBe('UNDER');
+    expect(plan.hedgePercent).toBeGreaterThan(0);
+  });
+
+  it('waits for the sportsbook second-half line before recommending a hedge', () => {
+    const plan = PredictionEngine.getLiveHalftimeSummary({
+      totalLine: 48,
+      halftimeScore: 8,
+      secondHalfProjection: 24,
+      originalSide: 'UNDER',
+      stake: 100,
+      juice: '-110',
+      sportsbookSecondHalfLine: null,
+    });
+
+    expect(plan.result).toBe('WAITING_FOR_LINE');
+    expect(plan.summary).toContain('waiting for 2h line');
+    expect(plan.hedgePercent).toBe(0);
+  });
+
+  it('does not recommend a hedge when there is no dual-win interval', () => {
+    const plan = PredictionEngine.getLiveHalftimeSummary({
+      totalLine: 48,
+      halftimeScore: 8,
+      secondHalfProjection: 10,
+      originalSide: 'UNDER',
+      stake: 100,
+      juice: '-110',
+      sportsbookSecondHalfLine: 18.5,
+    });
+
+    expect(plan.result).toBe('BROWN_ZONE');
+    expect(plan.hedgePercent).toBe(0);
+  });
+
+  it('parses sportsbook odds strings like -110 and +100 for the halftime hedge', () => {
+    const underPlan = PredictionEngine.getHalftimeHedge({
+      totalLine: 44,
+      halftimeTotal: 22,
+      originalSide: 'OVER',
+      stake: 100,
+      midpoint: 45,
+      juice: '-110',
+      secondHalfLine: 21,
+    });
+
+    const overPlan = PredictionEngine.getHalftimeHedge({
+      totalLine: 44,
+      halftimeTotal: 22,
+      originalSide: 'UNDER',
+      stake: 100,
+      midpoint: 45,
+      juice: '+100',
+      secondHalfLine: 21,
+    });
+
+    expect(underPlan.juice).toBe(-110);
+    expect(overPlan.juice).toBe(100);
+    expect(underPlan.summary).toContain('-110');
+    expect(overPlan.summary).toContain('+100');
+  });
+
+  it('uses a live halftime target based on score and clock instead of a flat half-line default', () => {
+    const earlyGame = PredictionEngine.getLiveHalftimeTarget({ totalLine: 44, scoreTotal: 17, clock: 'Q2 05:00' });
+    const lateGame = PredictionEngine.getLiveHalftimeTarget({ totalLine: 44, scoreTotal: 31, clock: 'Q4 02:00' });
+
+    expect(earlyGame).toBeGreaterThan(18);
+    expect(earlyGame).toBeLessThan(23);
+    expect(lateGame).toBeGreaterThan(earlyGame);
+  });
+
+  it('marks a wide miss as a brown-zone loss with no real hedge value', () => {
+    const plan = PredictionEngine.getLiveHalftimeSummary({
+      totalLine: 44,
+      halftimeScore: 16,
+      secondHalfProjection: 7,
+      originalSide: 'OVER',
+      stake: 100,
+      juice: '-110',
+      sportsbookSecondHalfLine: 18.5,
+    });
+
+    expect(plan.result).toBe('BROWN_ZONE');
+    expect(plan.hedgeSide).toBe('UNDER');
+    expect(plan.summary).toContain('hold original position');
+  });
+
   it('builds a simple team strength rating from historical game results', () => {
     const games = [
       new NFLGame({

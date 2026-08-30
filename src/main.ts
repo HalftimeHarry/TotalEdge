@@ -253,7 +253,117 @@ class TotalEdgeApp {
       details.className = 'muted';
       details.textContent = pickInfo.reason;
 
-      listItem.append(summary, details);
+      const halftimeCard = document.createElement('div');
+      halftimeCard.className = 'halftime-card';
+
+      const cardHeader = document.createElement('div');
+      cardHeader.className = 'halftime-card__header';
+
+      const cardLabel = document.createElement('span');
+      cardLabel.className = 'halftime-card__label';
+      cardLabel.textContent = 'Halftime Recommendation';
+
+      const cardBadge = document.createElement('span');
+      cardBadge.className = 'halftime-card__badge';
+      cardBadge.textContent = 'WAITING';
+
+      cardHeader.append(cardLabel, cardBadge);
+
+      const fieldGrid = document.createElement('div');
+      fieldGrid.className = 'halftime-card__field-grid';
+
+      const totalField = document.createElement('label');
+      totalField.className = 'halftime-card__field';
+      totalField.innerHTML = '<span>Projected Total</span><input type="number" min="0" step="0.5" value="' + (total ?? 0) + '" aria-label="Projected total" />';
+
+      const halftimeField = document.createElement('label');
+      halftimeField.className = 'halftime-card__field';
+      halftimeField.innerHTML = '<span>Halftime score</span><input type="number" min="0" step="0.5" value="' + (total === null ? 0 : Math.max(0, total / 2)) + '" aria-label="Halftime score" />';
+
+      const secondHalfField = document.createElement('label');
+      secondHalfField.className = 'halftime-card__field';
+      const defaultSecondHalf = total === null ? 0 : Math.max(0, total / 2);
+      secondHalfField.innerHTML = '<span>Projected 2H total</span><input type="number" min="0" step="0.5" value="' + defaultSecondHalf + '" aria-label="Second-half total projection" />';
+
+      const secondHalfLineField = document.createElement('label');
+      secondHalfLineField.className = 'halftime-card__field';
+      secondHalfLineField.innerHTML = '<span>Sportsbook 2H line</span><input type="number" min="0" step="0.5" placeholder="18.5" aria-label="Sportsbook second-half total line" />';
+
+      const juiceField = document.createElement('label');
+      juiceField.className = 'halftime-card__field';
+      juiceField.innerHTML = '<span>Juice</span><select aria-label="Juice odds"><option value="-105">-105</option><option value="-110" selected>-110</option><option value="-115">-115</option><option value="-120">-120</option><option value="-125">-125</option><option value="+100">+100</option><option value="+110">+110</option><option value="+120">+120</option><option value="+130">+130</option></select>';
+
+      fieldGrid.append(totalField, halftimeField, secondHalfField, secondHalfLineField, juiceField);
+
+      const cardMeta = document.createElement('p');
+      cardMeta.className = 'halftime-card__meta';
+      cardMeta.textContent = 'UNDER hedge • 0% of stake';
+
+      const cardSummary = document.createElement('p');
+      cardSummary.className = 'halftime-card__summary';
+      cardSummary.textContent = 'Start with the projected total. At halftime, use the live score and juice to chase Seeking Butter Zone.';
+
+      const refreshHalftimeCard = (): void => {
+        const totalValue = Number((totalField.querySelector('input') as HTMLInputElement).value || total || 0);
+        const halftimeScore = Number((halftimeField.querySelector('input') as HTMLInputElement).value || Math.max(0, totalValue / 2));
+        const secondHalfProjection = Number((secondHalfField.querySelector('input') as HTMLInputElement).value || Math.max(0, totalValue / 2));
+        const secondHalfLineValue = (secondHalfLineField.querySelector('input') as HTMLInputElement).value;
+        const sportsbookSecondHalfLine = secondHalfLineValue === '' ? null : Number(secondHalfLineValue);
+        const juiceValue = (juiceField.querySelector('select') as HTMLSelectElement).value || '-110';
+
+        const plan = total === null
+          ? null
+          : PredictionEngine.getLiveHalftimeSummary({
+            totalLine: totalValue,
+            halftimeScore,
+            secondHalfProjection,
+            originalSide: pickInfo.pick,
+            stake: 100,
+            midpoint,
+            juice: juiceValue,
+            sportsbookSecondHalfLine,
+          });
+
+        if (!plan) {
+          cardBadge.textContent = 'NO DATA';
+          cardBadge.className = 'halftime-card__badge neutral';
+          cardMeta.textContent = 'Need a total line to calculate a halftime hedge.';
+          cardSummary.textContent = 'No halftime recommendation available for this pick.';
+          return;
+        }
+
+        const juiceLabel = plan.juice > 0 ? `+${plan.juice}` : `${plan.juice}`;
+        const displayResult = plan.result === 'BUTTER_ZONE'
+          ? '🧈 BUTTER ZONE'
+          : plan.result === 'WAITING_FOR_LINE'
+            ? 'WAITING FOR 2H LINE'
+            : 'Do Not Bet';
+        cardBadge.textContent = displayResult;
+        cardBadge.className = `halftime-card__badge ${plan.result.toLowerCase().replace(/_/g, '-')}`;
+        const hedgeText = plan.result === 'WAITING_FOR_LINE'
+          ? 'WAITING FOR 2H LINE'
+          : plan.result === 'BROWN_ZONE'
+            ? 'DO NOT BET — HOLD ORIGINAL POSITION'
+            : `${plan.hedgeSide} hedge • ${Math.round(plan.hedgePercent * 100)}% of stake • juice ${juiceLabel}`;
+        cardMeta.textContent = hedgeText;
+        cardSummary.textContent = plan.summary;
+      };
+
+      totalField.querySelector('input')?.addEventListener('input', () => {
+        const totalInput = totalField.querySelector('input') as HTMLInputElement;
+        if (!totalInput.value) {
+          return;
+        }
+        refreshHalftimeCard();
+      });
+      halftimeField.querySelector('input')?.addEventListener('input', refreshHalftimeCard);
+      secondHalfField.querySelector('input')?.addEventListener('input', refreshHalftimeCard);
+      secondHalfLineField.querySelector('input')?.addEventListener('input', refreshHalftimeCard);
+      (juiceField.querySelector('select') as HTMLSelectElement)?.addEventListener('change', refreshHalftimeCard);
+      refreshHalftimeCard();
+
+      halftimeCard.append(cardHeader, fieldGrid, cardMeta, cardSummary);
+      listItem.append(summary, details, halftimeCard);
       this.predictionList.appendChild(listItem);
     }
   }
