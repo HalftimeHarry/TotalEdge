@@ -13,8 +13,10 @@ TotalEdge is a browser-based NFL totals analysis app built with Vite and TypeScr
 
 ## Requirements
 
-- Node.js 20+
+- Node.js 20.19.0 or newer
 - npm 10+
+
+This project uses Vite 8, which requires a modern Node.js runtime. If you run an older Node release, the app may fail before startup with a confusing Rolldown error.
 
 ## Install
 
