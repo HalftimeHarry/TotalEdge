@@ -23,15 +23,16 @@ const REQUIRED_COLUMN_INDEXES = {
 export class CsvImporter {
   public importFromText(csvText: string, selectedWeek?: string): NFLGame[] {
     const rows = this.parseRows(csvText);
+    const headerRowIndex = this.findHeaderRow(rows);
 
-    if (rows.length < 2) {
+    if (headerRowIndex < 0) {
       return [];
     }
 
-    const columnMap = this.getColumnMap(rows[0]);
+    const columnMap = this.getColumnMap(rows[headerRowIndex]);
     const games: NFLGame[] = [];
 
-    for (let i = 1; i < rows.length; i += 1) {
+    for (let i = headerRowIndex + 1; i < rows.length; i += 1) {
       const row = rows[i];
       const game = this.mapRowToGame(row, columnMap, selectedWeek);
 
@@ -45,15 +46,16 @@ export class CsvImporter {
 
   public getAvailableWeeks(csvText: string): string[] {
     const rows = this.parseRows(csvText);
+    const headerRowIndex = this.findHeaderRow(rows);
 
-    if (rows.length < 2) {
+    if (headerRowIndex < 0) {
       return [];
     }
 
-    const columnMap = this.getColumnMap(rows[0]);
+    const columnMap = this.getColumnMap(rows[headerRowIndex]);
     const weeks = new Set<string>();
 
-    for (let i = 1; i < rows.length; i += 1) {
+    for (let i = headerRowIndex + 1; i < rows.length; i += 1) {
       const row = rows[i];
       const week = this.readValue(row, columnMap.weekIndex);
 
@@ -99,11 +101,11 @@ export class CsvImporter {
 
     const weekIndex = this.findHeaderIndex(normalizedHeaders, ['week', 'week number', 'wk', 'week #']);
     const dateIndex = this.findHeaderIndex(normalizedHeaders, ['date', 'game date', 'matchup date']);
-    const team1Index = this.findHeaderIndex(normalizedHeaders, ['winner/tie', 'winner', 'team 1', 'team1', 'home team', 'home', 'team 1 name', 'team 1 team']);
-    const team2Index = this.findHeaderIndex(normalizedHeaders, ['loser/tie', 'loser', 'team 2', 'team2', 'away team', 'away', 'team 2 name', 'team 2 team']);
-    const team1ScoreIndex = this.findHeaderIndex(normalizedHeaders, ['team 1 score', 'team1 score', 'score 1', 'score1', 'home score', 'pts']);
-    const team2ScoreIndex = this.findHeaderIndex(normalizedHeaders, ['team 2 score', 'team2 score', 'score 2', 'score2', 'away score', 'pts']);
-    const totalLineIndex = this.findHeaderIndex(normalizedHeaders, ['total line', 'totalline', 'closing total', 'closing_total', 'ou line', 'over/under', 'total']);
+    const team1Index = this.findHeaderIndex(normalizedHeaders, ['winner/tie', 'winner', 'team 1', 'team1', 'away', 'away team', 'home team', 'home', 'team 1 name', 'team 1 team']);
+    const team2Index = this.findHeaderIndex(normalizedHeaders, ['loser/tie', 'loser', 'team 2', 'team2', 'home', 'home team', 'away team', 'away', 'team 2 name', 'team 2 team']);
+    const team1ScoreIndex = this.findHeaderIndex(normalizedHeaders, ['team 1 score', 'team1 score', 'score 1', 'score1', 'away score', 'home score', 'pts']);
+    const team2ScoreIndex = this.findHeaderIndex(normalizedHeaders, ['team 2 score', 'team2 score', 'score 2', 'score2', 'home score', 'away score', 'pts']);
+    const totalLineIndex = this.findHeaderIndex(normalizedHeaders, ['total line', 'totalline', 'closing total', 'closing_total', 'ou line', 'over/under', 'o/u', 'total']);
 
     const duplicatePtsIndexes = normalizedHeaders
       .map((header, index) => (header === 'pts' || header.includes('pts') ? index : -1))
@@ -129,6 +131,14 @@ export class CsvImporter {
 
   private findHeaderIndex(headers: string[], aliases: string[]): number {
     for (const alias of aliases) {
+      const exactIndex = headers.findIndex((header) => header.trim().toLowerCase() === alias);
+
+      if (exactIndex >= 0) {
+        return exactIndex;
+      }
+    }
+
+    for (const alias of aliases) {
       const matchingIndex = headers.findIndex((header) => {
         const normalizedHeader = header.trim().toLowerCase();
         return normalizedHeader === alias || normalizedHeader.includes(alias);
@@ -140,6 +150,16 @@ export class CsvImporter {
     }
 
     return -1;
+  }
+
+  private findHeaderRow(rows: string[][]): number {
+    return rows.findIndex((row) => {
+      const headers = row.map((value) => value.trim().toLowerCase());
+      const hasDate = this.findHeaderIndex(headers, ['date', 'game date', 'matchup date']) >= 0;
+      const hasTeam = this.findHeaderIndex(headers, ['team 1', 'team1', 'away team', 'home team', 'winner/tie']) >= 0;
+      const hasScore = this.findHeaderIndex(headers, ['team 1 score', 'team1 score', 'score 1', 'score1', 'away score', 'home score', 'pts']) >= 0;
+      return hasDate && hasTeam && hasScore;
+    });
   }
 
   private normalizeWeekLabel(value: string): string {

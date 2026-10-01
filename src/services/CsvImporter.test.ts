@@ -52,4 +52,23 @@ describe('CsvImporter', () => {
     expect(games[1].team1Score).toBe(23);
     expect(games[1].team2Score).toBe(20);
   });
+
+  it('imports a Google Sheets scoreboard with metadata rows before the header', () => {
+    const csv = [
+      'Week 3,data last refreshed:,,,,',
+      '<- games in play,,,,',
+      'Wed 12:34 PM,Date,Time,Away Team,Away,Home Team,Home,Away Score,Home Score,Qtr,Clock,Situation,Pos,Score,Total Points,O/U,Odds,Broadcast',
+      'Week 3,Thu 09/24/2026,8:15 PM,Falcons,ATL,Packers,GB,35,14,F,0:00,game over,,ATL 35 GB 14 (F),49,42.5,GB -4.5,Prime Video',
+    ].join('\n');
+
+    const games = new CsvImporter().importFromText(csv);
+
+    expect(games).toHaveLength(1);
+    expect(games[0].week).toBe('Week 3');
+    expect(games[0].team1).toBe('Atlanta Falcons');
+    expect(games[0].team2).toBe('Green Bay Packers');
+    expect(games[0].team1Score).toBe(35);
+    expect(games[0].team2Score).toBe(14);
+    expect(games[0].totalLine).toBe(42.5);
+  });
 });

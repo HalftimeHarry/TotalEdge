@@ -4,6 +4,13 @@ import { Prediction } from './models/Prediction';
 import { CsvImporter } from './services/CsvImporter';
 import { LineService } from './services/LineService';
 import { PredictionEngine } from './services/PredictionEngine';
+import { BacktestService } from './services/BacktestService';
+import {
+  mergeHistoricalGames,
+  readHistoricalGames,
+  readRemoteHistoricalGames,
+  writeRemoteHistoricalGames,
+} from './services/HistoricalGameStorage';
 import {
   getActiveProfile,
   readSavedProfiles,
@@ -19,11 +26,14 @@ class TotalEdgeApp {
   private readonly importer = new CsvImporter();
   private readonly lineService = new LineService();
   private readonly predictionEngine = new PredictionEngine();
+  private readonly backtestService = new BacktestService();
   private importedGames: NFLGame[] = [];
   private games: NFLGame[] = [];
 
   private readonly appRoot: HTMLDivElement;
   private readonly fileInput: HTMLInputElement;
+  private readonly sheetUrlInput: HTMLInputElement;
+  private readonly importSheetButton: HTMLButtonElement;
   private readonly dropZone: HTMLLabelElement;
   private readonly weekFilter: HTMLSelectElement;
   private readonly lineWeekSelect: HTMLSelectElement;
@@ -38,13 +48,17 @@ class TotalEdgeApp {
   private readonly gameCountValue: HTMLSpanElement;
   private readonly tableBody: HTMLTableSectionElement;
   private readonly generateButton: HTMLButtonElement;
+  private readonly saveSharedHistoryButton: HTMLButtonElement;
   private readonly predictionList: HTMLUListElement;
+  private readonly backtestResults: HTMLDivElement;
 
   constructor() {
     this.appRoot = document.querySelector<HTMLDivElement>('#app')!;
     this.appRoot.innerHTML = this.getLayout();
 
     this.fileInput = document.querySelector<HTMLInputElement>('#csv-file-input')!;
+    this.sheetUrlInput = document.querySelector<HTMLInputElement>('#sheet-url-input')!;
+    this.importSheetButton = document.querySelector<HTMLButtonElement>('#import-sheet-button')!;
     this.dropZone = document.querySelector<HTMLLabelElement>('#drop-zone')!;
     this.weekFilter = document.querySelector<HTMLSelectElement>('#week-filter')!;
     this.lineWeekSelect = document.querySelector<HTMLSelectElement>('#line-week-select')!;
@@ -59,12 +73,19 @@ class TotalEdgeApp {
     this.gameCountValue = document.querySelector<HTMLSpanElement>('#game-count-value')!;
     this.tableBody = document.querySelector<HTMLTableSectionElement>('#games-table-body')!;
     this.generateButton = document.querySelector<HTMLButtonElement>('#generate-button')!;
+    this.saveSharedHistoryButton = document.querySelector<HTMLButtonElement>('#save-shared-history-button')!;
     this.predictionList = document.querySelector<HTMLUListElement>('#prediction-list')!;
+    this.backtestResults = document.querySelector<HTMLDivElement>('#backtest-results')!;
 
     this.restoreSavedDefaults();
+    this.importedGames = readHistoricalGames();
+    this.games = [...this.importedGames];
+    this.populateWeekOptionsFromWeeks(this.getAvailableWeeks(this.importedGames));
     this.updateDefaultProfileButtonLabel();
     this.bindEvents();
     this.renderGames();
+    this.renderBacktest();
+    void this.restoreRemoteHistory();
   }
 
   private restoreSavedDefaults(): void {
@@ -227,6 +248,40 @@ class TotalEdgeApp {
       this.fileInput.value = '';
     });
 
+    this.importSheetButton.addEventListener('click', async () => {
+      const sheetUrl = this.sheetUrlInput.value.trim();
+
+      if (!sheetUrl) {
+        this.lineStatus.textContent = 'Enter a public Google Sheets URL before importing.';
+        this.lineStatus.classList.add('error');
+        return;
+      }
+
+      this.importSheetButton.disabled = true;
+      this.lineStatus.textContent = 'Fetching scores from Google Sheets...';
+      this.lineStatus.classList.remove('error');
+
+      try {
+        const response = await fetch(this.getGoogleSheetCsvUrl(sheetUrl));
+        if (!response.ok) {
+          throw new Error(`Google Sheets returned ${response.status}.`);
+        }
+
+        this.importCsvText(await response.text());
+        if (!this.lineTextArea.value.trim()) {
+          this.lineStatus.textContent = 'Scores imported from Google Sheets.';
+          this.lineStatus.classList.remove('error');
+        }
+      } catch (error) {
+        this.lineStatus.textContent = error instanceof Error
+          ? `${error.message} Confirm the sheet is shared publicly.`
+          : 'Could not import Google Sheets data. Confirm the sheet is shared publicly.';
+        this.lineStatus.classList.add('error');
+      } finally {
+        this.importSheetButton.disabled = false;
+      }
+    });
+
     this.dropZone.addEventListener('dragover', (event) => {
       event.preventDefault();
       this.dropZone.classList.add('active');
@@ -310,20 +365,106 @@ class TotalEdgeApp {
     this.generateButton.addEventListener('click', () => {
       this.renderPredictions(this.predictionEngine.generatePredictions(this.games));
     });
+
+    this.saveSharedHistoryButton.addEventListener('click', async () => {
+      if (!this.importedGames.length) {
+        return;
+      }
+
+      this.saveSharedHistoryButton.disabled = true;
+      this.lineStatus.textContent = 'Saving shared history...';
+      this.lineStatus.classList.remove('error');
+      await this.persistRemoteHistory(this.importedGames);
+      if (!this.lineStatus.classList.contains('error')) {
+        this.lineStatus.textContent = `Shared history saved: ${this.importedGames.length} games.`;
+      }
+      this.saveSharedHistoryButton.disabled = false;
+    });
   }
 
   private async importFile(file: File): Promise<void> {
-    const contents = await file.text();
-    const selectedWeek = this.weekFilter.value === 'all' ? undefined : this.weekFilter.value;
-    this.importedGames = this.importer.importFromText(contents, selectedWeek);
-    this.populateWeekOptions(contents);
-    this.applyWeekFilter();
-    this.predictionList.innerHTML = '';
+    this.importCsvText(await file.text());
   }
 
-  private populateWeekOptions(csvText: string): void {
-    const availableWeeks = this.importer.getAvailableWeeks(csvText);
+  private importCsvText(contents: string): void {
+    this.importedGames = this.importer.importFromText(contents);
+    const availableWeeks = this.importer.getAvailableWeeks(contents);
+    const hasExistingLineText = this.lineTextArea.value.trim().length > 0;
+    this.importedGames = mergeHistoricalGames(readHistoricalGames(), this.importer.importFromText(contents));
+    void this.persistRemoteHistory(this.importedGames);
+    const importedWeeks = this.getAvailableWeeks(this.importedGames);
+    this.populateWeekOptionsFromWeeks(importedWeeks);
+    if (!hasExistingLineText && availableWeeks.length === 1) {
+      this.syncLineWeekToScores(availableWeeks);
+    }
+    this.applyWeekFilter();
+    this.predictionList.innerHTML = '';
+    if (hasExistingLineText) {
+      const weekLabel = availableWeeks.length === 1 ? availableWeeks[0] : 'the imported weeks';
+      this.lineStatus.textContent = `Imported scores for ${weekLabel}. Existing sportsbook picks were cleared; parse matching lines before reviewing predictions.`;
+      this.lineStatus.classList.remove('error');
+    }
+  }
 
+  private async restoreRemoteHistory(): Promise<void> {
+    const remoteGames = await readRemoteHistoricalGames();
+    if (!remoteGames.length) {
+      if (this.importedGames.length) {
+        await this.persistRemoteHistory(this.importedGames);
+      }
+      return;
+    }
+
+    this.importedGames = mergeHistoricalGames(this.importedGames, remoteGames);
+    await this.persistRemoteHistory(this.importedGames);
+    this.populateWeekOptionsFromWeeks(this.getAvailableWeeks(this.importedGames));
+    this.applyWeekFilter();
+  }
+
+  private async persistRemoteHistory(games: NFLGame[]): Promise<void> {
+    try {
+      await writeRemoteHistoricalGames(games);
+    } catch (error) {
+      const detail = error instanceof Error ? ` (${error.message})` : '';
+      this.lineStatus.textContent = `Saved locally. Shared history could not be updated${detail}. The npoint bin may require an edit credential.`;
+      this.lineStatus.classList.add('error');
+    }
+  }
+
+  private syncLineWeekToScores(availableWeeks: string[]): void {
+    if (availableWeeks.length !== 1) {
+      return;
+    }
+
+    const weekNumber = availableWeeks[0].replace(/^week\s*/i, '').trim();
+    const matchingOption = Array.from(this.lineWeekSelect.options)
+      .find((option) => option.value === weekNumber);
+
+    if (matchingOption) {
+      this.lineWeekSelect.value = matchingOption.value;
+    }
+  }
+
+  private getGoogleSheetCsvUrl(sheetUrl: string): string {
+    const parsedUrl = new URL(sheetUrl);
+    const spreadsheetMatch = parsedUrl.pathname.match(/\/spreadsheets\/d\/([^/]+)/);
+
+    if (!spreadsheetMatch) {
+      throw new Error('That does not look like a Google Sheets URL.');
+    }
+
+    const gid = parsedUrl.searchParams.get('gid');
+    const exportUrl = new URL(`https://docs.google.com/spreadsheets/d/${spreadsheetMatch[1]}/export`);
+    exportUrl.searchParams.set('format', 'csv');
+
+    if (gid) {
+      exportUrl.searchParams.set('gid', gid);
+    }
+
+    return exportUrl.toString();
+  }
+
+  private populateWeekOptionsFromWeeks(availableWeeks: string[]): void {
     this.weekFilter.innerHTML = '<option value="all">All weeks</option>' + availableWeeks.map((week) => `<option value="${week}">${week}</option>`).join('');
 
     if (availableWeeks.length === 1) {
@@ -333,12 +474,18 @@ class TotalEdgeApp {
     }
   }
 
+  private getAvailableWeeks(games: NFLGame[]): string[] {
+    return Array.from(new Set(games.map((game) => game.week)))
+      .sort((left, right) => left.localeCompare(right, undefined, { numeric: true }));
+  }
+
   private applyWeekFilter(): void {
     const selectedWeek = this.weekFilter.value;
 
     if (!this.importedGames.length) {
       this.games = [];
       this.renderGames();
+      this.renderBacktest();
       return;
     }
 
@@ -347,6 +494,7 @@ class TotalEdgeApp {
       : this.importedGames.filter((game) => game.week === selectedWeek);
 
     this.renderGames();
+    this.renderBacktest();
   }
 
   private renderGames(): void {
@@ -355,6 +503,7 @@ class TotalEdgeApp {
     this.gameCountValue.textContent = String(this.games.length);
     this.weekValue.textContent = this.getWeekLabel();
     this.generateButton.disabled = this.games.length === 0;
+    this.saveSharedHistoryButton.disabled = this.importedGames.length === 0;
 
     for (const game of this.games) {
       const row = document.createElement('tr');
@@ -372,6 +521,54 @@ class TotalEdgeApp {
 
       this.tableBody.appendChild(row);
     }
+  }
+
+  private renderBacktest(): void {
+    const results = this.backtestService.evaluateMidpoints(
+      this.games,
+      Array.from({ length: 15 }, (_, index) => 38 + index),
+    );
+
+    this.backtestResults.innerHTML = '';
+
+    if (!results.length || results[0].games === 0) {
+      const empty = document.createElement('p');
+      empty.className = 'muted';
+      empty.textContent = 'Upload historical scores with a Total Line column to compare midpoint settings.';
+      this.backtestResults.appendChild(empty);
+      return;
+    }
+
+    const best = results[0];
+    const summary = document.createElement('p');
+    summary.className = 'backtest-summary';
+    summary.textContent = `Best tested midpoint: ${best.midpoint} • ${best.wins}-${best.losses}-${best.pushes} • ${(best.accuracy * 100).toFixed(1)}% accuracy`;
+    this.backtestResults.appendChild(summary);
+
+    const tableWrap = document.createElement('div');
+    tableWrap.className = 'table-wrap';
+    const table = document.createElement('table');
+    table.innerHTML = `
+      <thead>
+        <tr><th>Rank</th><th>Midpoint</th><th>Record</th><th>Pushes</th><th>Accuracy</th><th>Games</th></tr>
+      </thead>
+      <tbody></tbody>
+    `;
+    const tableBody = table.querySelector('tbody')!;
+
+    results.forEach((result, index) => {
+      const row = document.createElement('tr');
+      this.appendCell(row, String(index + 1));
+      this.appendCell(row, String(result.midpoint));
+      this.appendCell(row, `${result.wins}-${result.losses}`);
+      this.appendCell(row, String(result.pushes));
+      this.appendCell(row, `${(result.accuracy * 100).toFixed(1)}%`);
+      this.appendCell(row, String(result.games));
+      tableBody.appendChild(row);
+    });
+
+    tableWrap.appendChild(table);
+    this.backtestResults.appendChild(tableWrap);
   }
 
   private renderPredictions(predictions: Prediction[]): void {
@@ -596,6 +793,12 @@ class TotalEdgeApp {
             </select>
           </div>
 
+          <label class="field-label" for="sheet-url-input">Google Sheets scores URL</label>
+          <div class="sheet-import-controls">
+            <input id="sheet-url-input" type="url" value="https://docs.google.com/spreadsheets/d/1VKEMLSsSgzPihoGaG0q51-hKofAGY59x6lHa7hVXPms/edit?gid=2012782522#gid=2012782522" />
+            <button id="import-sheet-button" type="button">Import Google Sheet</button>
+          </div>
+
           <label class="field-label" for="line-text-input">Paste sportsbook line data</label>
           <textarea id="line-text-input" rows="7" placeholder="Paste raw sportsbook text here..."></textarea>
           <p id="line-status" class="line-status">Waiting for line data.</p>
@@ -608,7 +811,7 @@ class TotalEdgeApp {
 
           <div id="saved-profiles-list" class="saved-profiles-list"></div>
 
-          <div class="upload-controls" style="display: none;">
+          <div class="upload-controls">
             <label class="field-label" for="week-filter">Imported week filter</label>
             <select id="week-filter">
               <option value="all">All weeks</option>
@@ -621,7 +824,7 @@ class TotalEdgeApp {
           </label>
         </section>
 
-        <section class="panel summary-grid" style="display: none;">
+        <section class="panel summary-grid">
           <div>
             <h2>Imported Week(s)</h2>
             <p id="week-value">None</p>
@@ -634,9 +837,13 @@ class TotalEdgeApp {
             <h2>Predictions</h2>
             <button id="generate-button" type="button" disabled>Generate Predictions</button>
           </div>
+          <div>
+            <h2>Shared History</h2>
+            <button id="save-shared-history-button" type="button" class="secondary" disabled>Save Shared History</button>
+          </div>
         </section>
 
-        <section class="panel" style="display: none;">
+        <section class="panel">
           <h2>Imported Games</h2>
           <div class="table-wrap">
             <table>
@@ -654,6 +861,12 @@ class TotalEdgeApp {
               <tbody id="games-table-body"></tbody>
             </table>
           </div>
+        </section>
+
+        <section class="panel">
+          <h2>Midpoint Settings Backtest</h2>
+          <p class="muted">Ranks midpoint settings against imported games with a closing total. Pushes are excluded from accuracy.</p>
+          <div id="backtest-results"></div>
         </section>
 
         <section class="panel">
